@@ -219,9 +219,7 @@ table.editable .rm{background:none;border:none;color:var(--terra);cursor:pointer
 .sign-actions .accept input{margin-top:3px;}
 .confirm-box{text-align:center;padding:30px;color:var(--teal-deep);font-family:'Fraunces',serif;font-size:18px;}
 </style>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 <div id="app">
@@ -510,7 +508,7 @@ function fmtDate(s){
 }
 
 /* ---------------------------------------------------------------
-   STATE + STORAGE (Firebase: Firestore + Authentication)
+   STATE + STORAGE (Supabase: base de datos + Authentication)
 --------------------------------------------------------------- */
 let DOCS = [];
 let USERS = [];
@@ -519,27 +517,18 @@ let currentUser = null;
 let storageAvailable = true;
 let view = {mode:'home'}; // home | list | form | preview | auth | firmar
 
-// ⚠️ CONFIGURACIÓN: pega aquí los datos de TU proyecto de Firebase (gratis).
-// Los obtienes en https://console.firebase.google.com → Configuración del proyecto → Tus apps → SDK.
-const firebaseConfig =  {
-    apiKey: "AIzaSyCRsLNChYrBwKQnWt5Chfp0zPRGFgPxjVg",
-    authDomain: "gestion-documental-jac-pro.firebaseapp.com",
-    projectId: "gestion-documental-jac-pro",
-    storageBucket: "gestion-documental-jac-pro.firebasestorage.app",
-    messagingSenderId: "196771804080",
-    appId: "1:196771804080:web:ce954e4c2d348854b85c75",
-    measurementId: "G-W91MM48PPJ"
-  };
+// ⚠️ CONFIGURACIÓN: pega aquí los datos de TU proyecto de Supabase (gratis).
+// Los obtienes en https://supabase.com → tu proyecto → Project Settings → API.
+const SUPABASE_URL = https://rluejdoknprbbyufaxop.supabase.co 
+const SUPABASE_ANON_KEY = sb_publishable_NTHC7gcKhf6vOeK2HWCDAg_cA6tULET;
 // Código de acceso que compartes solo con los integrantes de la JAC para que puedan crear su cuenta.
 // Cámbialo por el que quieras antes de publicar.
 const CODIGO_ACCESO_JAC = "TEJIENDO2026";
 
-let auth = null, db = null;
+let sb = null;
 try{
-  firebase.initializeApp(firebaseConfig);
-  auth = firebase.auth();
-  db = firebase.firestore();
-}catch(e){ console.error('Firebase no se pudo inicializar', e); storageAvailable=false; }
+  sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+}catch(e){ console.error('Supabase no se pudo inicializar', e); storageAvailable=false; }
 
 function withTimeout(promise, ms=8000){
   return new Promise((resolve,reject)=>{
@@ -551,25 +540,32 @@ function withTimeout(promise, ms=8000){
 }
 
 async function loadDocs(){
-  try{ const snap = await withTimeout(db.collection('app').doc('documentos').get()); DOCS = snap.exists ? (snap.data().value||[]) : []; }
-  catch(e){ DOCS = []; storageAvailable=false; }
+  try{
+    const {data, error} = await withTimeout(sb.from('app_data').select('value').eq('key','documentos').maybeSingle());
+    if(error) throw error;
+    DOCS = data ? (data.value||[]) : [];
+  }catch(e){ DOCS = []; storageAvailable=false; }
 }
 async function saveDocs(){
-  try{ await withTimeout(db.collection('app').doc('documentos').set({value:DOCS})); }
+  try{ const {error} = await withTimeout(sb.from('app_data').upsert({key:'documentos', value:DOCS})); if(error) throw error; }
   catch(e){ console.error('No se pudo guardar', e); storageAvailable=false; }
 }
 async function loadUsers(){
   try{
-    const snap = await withTimeout(db.collection('usuarios').get());
-    USERS = snap.docs.map(d=>({uid:d.id, ...d.data()}));
+    const {data, error} = await withTimeout(sb.from('usuarios').select('*'));
+    if(error) throw error;
+    USERS = (data||[]).map(u=>({uid:u.id, nombre:u.nombre, email:u.email, rol:u.rol}));
   }catch(e){ USERS = []; storageAvailable=false; }
 }
 async function loadFirmas(){
-  try{ const snap = await withTimeout(db.collection('app').doc('firmas').get()); FIRMAS = snap.exists ? (snap.data().value||{}) : {}; }
-  catch(e){ FIRMAS = {}; storageAvailable=false; }
+  try{
+    const {data, error} = await withTimeout(sb.from('app_data').select('value').eq('key','firmas').maybeSingle());
+    if(error) throw error;
+    FIRMAS = data ? (data.value||{}) : {};
+  }catch(e){ FIRMAS = {}; storageAvailable=false; }
 }
 async function saveFirmas(){
-  try{ await withTimeout(db.collection('app').doc('firmas').set({value:FIRMAS})); }
+  try{ const {error} = await withTimeout(sb.from('app_data').upsert({key:'firmas', value:FIRMAS})); if(error) throw error; }
   catch(e){ console.error('No se pudo guardar', e); storageAvailable=false; }
 }
 
@@ -644,7 +640,7 @@ function render(){
   if(foot && currentUser){
     foot.innerHTML = `Sesión: <b>${esc(currentUser.nombre)}</b> (${esc(currentUser.email)})<br><button id="logout-btn" style="background:none;border:none;color:#DCE8E3;text-decoration:underline;cursor:pointer;padding:4px 0;font-size:11px;">Cerrar sesión</button>`;
     const lb = document.getElementById('logout-btn');
-    if(lb) lb.onclick = async ()=>{ try{ await auth.signOut(); }catch(e){} currentUser=null; view={mode:'auth', tab:'login'}; renderStandalone(); };
+    if(lb) lb.onclick = async ()=>{ try{ await sb.auth.signOut(); }catch(e){} currentUser=null; view={mode:'auth', tab:'login'}; renderStandalone(); };
   }
   const main = document.getElementById('main');
   if(view.mode==='home') main.innerHTML = renderHome();
@@ -891,8 +887,8 @@ function attachHandlers(){
   });
 
   main.querySelectorAll('[data-deluser]').forEach(btn=>btn.onclick=async ()=>{
-    if(!confirm('¿Quitar a este integrante del listado del sistema? (Esto no elimina su cuenta de acceso, solo su perfil aquí; si quieres bloquearlo del todo, hazlo desde la consola de Firebase.)')) return;
-    try{ await withTimeout(db.collection('usuarios').doc(btn.dataset.deluser).delete()); }catch(e){ alert('No se pudo quitar: '+(e.message||e)); }
+    if(!confirm('¿Quitar a este integrante del listado del sistema? (Esto no elimina su cuenta de acceso, solo su perfil aquí; si quieres bloquearlo del todo, hazlo desde el panel de Supabase → Authentication.)')) return;
+    try{ const {error} = await withTimeout(sb.from('usuarios').delete().eq('id', btn.dataset.deluser)); if(error) throw error; }catch(e){ alert('No se pudo quitar: '+(e.message||e)); }
     await loadUsers(); render();
   });
 
@@ -958,7 +954,7 @@ function renderStandalone(){
 function standaloneWrap(inner){ return `<div class="standalone"><div class="auth-card">${inner}</div></div>`; }
 
 function storageWarningHtml(){
-  return storageAvailable ? '' : `<div class="error">No se pudo conectar con Firebase. Revisa que hayas pegado correctamente los datos de tu proyecto en firebaseConfig, y que el archivo esté publicado con un enlace propio (no solo en la vista previa del chat).</div>`;
+  return storageAvailable ? '' : `<div class="error">No se pudo conectar con Supabase. Revisa que hayas pegado correctamente SUPABASE_URL y SUPABASE_ANON_KEY, que hayas creado las tablas y publicado las políticas (RLS), y que el archivo esté publicado con un enlace propio (no solo en la vista previa del chat).</div>`;
 }
 function authHtml(){
   const tab = view.tab || 'login';
@@ -978,7 +974,7 @@ function authHtml(){
       <div class="field"><label>Contraseña</label><input type="password" id="li-pass" required></div>
       <button class="btn" type="submit" id="login-btn">Entrar</button>
     </form>
-    <div class="note">¿Olvidaste tu contraseña? Pídele a un integrante que te ayude, o usa la opción de recuperación desde tu correo si la habilitas en Firebase.</div>` : `
+    <div class="note">¿Olvidaste tu contraseña? Pídele a un integrante que te ayude, o usa la opción de recuperación desde tu correo si la habilitas en Supabase.</div>` : `
     <form id="signup-form">
       <div class="field"><label>Nombre completo</label><input type="text" id="su-nombre" required></div>
       <div class="field"><label>Correo</label><input type="text" id="su-correo" required></div>
@@ -1032,11 +1028,19 @@ function attachStandaloneHandlers(){
     if(codigo!==CODIGO_ACCESO_JAC){ view={mode:'auth', tab:'signup', error:'El código de acceso de la JAC no es correcto.'}; renderStandalone(); return; }
     try{
       if(btn){ btn.disabled=true; btn.textContent='Creando cuenta…'; }
-      const cred = await withTimeout(auth.createUserWithEmailAndPassword(correo, pass));
-      await withTimeout(db.collection('usuarios').doc(cred.user.uid).set({nombre, email:correo, rol:'Miembro'}));
-      // onAuthStateChanged se encarga de cargar el perfil y mostrar la app
+      const {data, error} = await withTimeout(sb.auth.signUp({email:correo, password:pass}));
+      if(error) throw error;
+      if(!data.user){ throw new Error('No se pudo crear el usuario.'); }
+      const {error: perfilError} = await withTimeout(sb.from('usuarios').insert({id:data.user.id, nombre, email:correo, rol:'Miembro'}));
+      if(perfilError) throw perfilError;
+      if(!data.session){
+        // El proyecto tiene "confirmar correo" activado: no hay sesión todavía.
+        view = {mode:'auth', tab:'login', error:'Cuenta creada. Revisa tu correo para confirmar la cuenta antes de iniciar sesión (o desactiva esa opción en Supabase → Authentication → Providers → Email).'};
+        renderStandalone();
+      }
+      // si sí hay sesión, onAuthStateChange se encarga de mostrar la app
     }catch(err){
-      view = {mode:'auth', tab:'signup', error: traducirErrorFirebase(err)};
+      view = {mode:'auth', tab:'signup', error: traducirErrorSupabase(err)};
       renderStandalone();
     }
   };
@@ -1049,10 +1053,11 @@ function attachStandaloneHandlers(){
     const pass = document.getElementById('li-pass').value;
     try{
       if(btn){ btn.disabled=true; btn.textContent='Entrando…'; }
-      await withTimeout(auth.signInWithEmailAndPassword(correo, pass));
-      // onAuthStateChanged se encarga del resto
+      const {error} = await withTimeout(sb.auth.signInWithPassword({email:correo, password:pass}));
+      if(error) throw error;
+      // onAuthStateChange se encarga del resto
     }catch(err){
-      view = {mode:'auth', tab:'login', error: traducirErrorFirebase(err)};
+      view = {mode:'auth', tab:'login', error: traducirErrorSupabase(err)};
       renderStandalone();
     }
   };
@@ -1077,19 +1082,18 @@ function attachStandaloneHandlers(){
   };
 }
 
-function traducirErrorFirebase(err){
-  const code = err && err.code || '';
+function traducirErrorSupabase(err){
+  const msg = (err && err.message) || String(err);
   const map = {
-    'auth/email-already-in-use':'Ese correo ya tiene una cuenta — usa "Iniciar sesión" en vez de "Crear cuenta".',
-    'auth/invalid-email':'El correo no es válido.',
-    'auth/weak-password':'La contraseña debe tener al menos 6 caracteres.',
-    'auth/wrong-password':'Correo o contraseña incorrectos.',
-    'auth/user-not-found':'No existe una cuenta con ese correo. Usa "Crear cuenta".',
-    'auth/invalid-credential':'Correo o contraseña incorrectos.',
-    'auth/network-request-failed':'No hay conexión con Firebase — revisa tu internet o los datos de firebaseConfig.',
-    'auth/configuration-not-found':'La autenticación por correo/contraseña no está habilitada en tu proyecto de Firebase (actívala en Authentication → Sign-in method).',
+    'User already registered':'Ese correo ya tiene una cuenta — usa "Iniciar sesión" en vez de "Crear cuenta".',
+    'Invalid login credentials':'Correo o contraseña incorrectos.',
+    'Password should be at least 6 characters':'La contraseña debe tener al menos 6 caracteres.',
+    'Email not confirmed':'Debes confirmar tu correo antes de iniciar sesión (revisa tu bandeja de entrada), o desactiva la confirmación en Supabase → Authentication → Providers → Email.',
+    'Unable to validate email address: invalid format':'El correo no es válido.',
   };
-  return map[code] || (err && err.message) || String(err);
+  for(const k in map){ if(msg.includes(k)) return map[k]; }
+  if(msg==='timeout') return 'No hay conexión con Supabase — revisa tu internet o los datos de SUPABASE_URL / SUPABASE_ANON_KEY.';
+  return msg;
 }
 
 function showFatalError(msg){
@@ -1104,6 +1108,21 @@ function showFatalError(msg){
 window.addEventListener('error', e=>{ showFatalError((e.error&&e.error.message)||e.message||'Error desconocido'); });
 window.addEventListener('unhandledrejection', e=>{ showFatalError((e.reason&&e.reason.message)||e.reason||'Error desconocido'); });
 
+async function handleAuthUser(user){
+  if(user){
+    try{
+      const {data: prof} = await withTimeout(sb.from('usuarios').select('*').eq('id', user.id).maybeSingle());
+      currentUser = prof ? {uid:user.id, email:user.email, nombre:prof.nombre, rol:prof.rol} : {uid:user.id, email:user.email, nombre:user.email, rol:'Miembro'};
+      await Promise.all([loadDocs(), loadUsers(), loadFirmas()]);
+      view = {mode:'home'}; showApp();
+    }catch(e){ showFatalError(e.message||e); }
+  } else {
+    currentUser = null;
+    view = {mode:'auth', tab:'login'};
+    renderStandalone();
+  }
+}
+
 /* boot */
 (async function(){
  try{
@@ -1115,21 +1134,14 @@ window.addEventListener('unhandledrejection', e=>{ showFatalError((e.reason&&e.r
     renderStandalone();
     return;
   }
-  if(!auth || !db){ view={mode:'auth', tab:'login', error:'Falta configurar Firebase: pega tus datos de firebaseConfig en el código.'}; renderStandalone(); return; }
+  if(!sb){ view={mode:'auth', tab:'login', error:'Falta configurar Supabase: pega tus datos de SUPABASE_URL y SUPABASE_ANON_KEY en el código.'}; renderStandalone(); return; }
 
-  auth.onAuthStateChanged(async (user)=>{
-    if(user){
-      try{
-        const prof = await withTimeout(db.collection('usuarios').doc(user.uid).get());
-        currentUser = prof.exists ? {uid:user.uid, email:user.email, ...prof.data()} : {uid:user.uid, email:user.email, nombre:user.email, rol:'Miembro'};
-        await Promise.all([loadDocs(), loadUsers(), loadFirmas()]);
-        view = {mode:'home'}; showApp();
-      }catch(e){ showFatalError(e.message||e); }
-    } else {
-      currentUser = null;
-      view = {mode:'auth', tab:'login'};
-      renderStandalone();
-    }
+  const {data:{session}} = await withTimeout(sb.auth.getSession());
+  await handleAuthUser(session ? session.user : null);
+  sb.auth.onAuthStateChange((event, session)=>{
+    // evita re-renderizar de más en eventos que no cambian el usuario
+    const uid = session && session.user ? session.user.id : null;
+    if(uid !== (currentUser && currentUser.uid)) handleAuthUser(session ? session.user : null);
   });
  }catch(e){ showFatalError(e.message || e); }
 })();
